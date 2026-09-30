@@ -25,18 +25,14 @@ describe("Analysis progress", () => {
   });
 
   it("shows actual grouping progress instead of treating reviewed runs as a finished scan", () => {
+    const expected = { step: 1, done: 2, total: 4, detail: "2 of 4 observation batches compared" };
     expect(
       analysisProgress({
         ...job,
         stage: "Grouping observations",
         coverage: { screened: 21, grouped_batches: 2, grouping_batches: 4 },
       }),
-    ).toMatchObject({
-      step: 1,
-      done: 2,
-      total: 4,
-      detail: "2 of 4 observation batches compared",
-    });
+    ).toMatchObject(expected);
   });
 
   it("keeps older worker grouping responses indeterminate", () => {
