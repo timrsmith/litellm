@@ -19,7 +19,9 @@ from litellm.proxy.engine.models import (
 
 
 class Storage(Protocol):
-    def query(self, sql: str, parameters: Mapping[str, object] | None = None) -> Awaitable[object]: ...
+    def lens_sample(self, parameters: Mapping[str, object]) -> Awaitable[object]: ...
+    def lens_content(self, parameters: Mapping[str, object]) -> Awaitable[object]: ...
+    def lens_evidence(self, parameters: Mapping[str, object]) -> Awaitable[object]: ...
 
 
 class ExecutionRow(BaseModel):
@@ -30,6 +32,7 @@ class ExecutionRow(BaseModel):
     start_time: str
     span_count: int
     root_seen: int
+    eligible: int
 
 
 class PartRow(BaseModel):
@@ -64,60 +67,10 @@ def parameters(scope: Scope, filters: tuple[MetadataFilter, ...]) -> Mapping[str
             "all_teams": int(scope.all_teams),
             "team": scope.team_id,
             "key_hash": scope.api_key_hash,
-            **MappingProxyType({f"key{i}": f.key for i, f in enumerate(filters)}),
-            **MappingProxyType({f"value{i}": f.value for i, f in enumerate(filters)}),
+            "filter_keys": tuple(f.key for f in filters),
+            "filter_values": tuple(f.value for f in filters),
         }
     )
-
-
-def selection(settings: EngineSettings, source: str) -> str:
-    conditions: Final = tuple(
-        (
-            f"(ResourceAttributes[{{key{i}:String}}] = {{value{i}:String}} OR "
-            f"SpanAttributes[{{key{i}:String}}] = {{value{i}:String}})"
-        )
-        if source == "traces"
-        else (
-            f"(JSONExtractString(metadata, {{key{i}:String}}) = {{value{i}:String}} OR "
-            f"({{key{i}:String}} = 'tag' AND has(request_tags, {{value{i}:String}})))"
-        )
-        for i, _ in enumerate(settings.filters)
-    )
-    return " AND ".join(conditions) or "1"
-
-
-def scope_sql(source: str) -> str:
-    team, key = ("TeamId", "ApiKeyHash") if source == "traces" else ("team_id", "api_key")
-    return (
-        f"({{all_teams:UInt8}}=1 OR {team}={{team:String}}) AND ({{key_hash:String}}='' OR {key}={{key_hash:String}})"
-    )
-
-
-def query_for(settings: EngineSettings, source: str) -> str:
-    if source == "traces":
-        return f"""SELECT 'traces' AS source, TraceId AS trace_id, TeamId AS team_id,
-          argMin(SpanName, Timestamp) AS name, toString(min(Timestamp)) AS start_time,
-          uniqExact(SpanId) AS span_count, countIf(ParentSpanId='') > 0 AS root_seen
-          FROM otel_traces WHERE {scope_sql(source)} GROUP BY TeamId, TraceId
-          HAVING max(if(EngineReceivedMs>0, toInt64(EngineReceivedMs),
-              toUnixTimestamp64Milli(Timestamp)+toInt64(intDiv(Duration,1000000)))) >= {{start:UInt64}}
-          AND max(EngineReceivedMs) < {{end:UInt64}}
-          AND max(toUnixTimestamp64Milli(Timestamp)+toInt64(intDiv(Duration,1000000))) < {{end:UInt64}}
-          AND countIf(({selection(settings, source)}) AND ({{service:String}}='' OR ServiceName={{service:String}})) > 0"""
-    linked: Final = (
-        ""
-        if settings.source != "both"
-        else f"""AND (team_id,response_id) NOT IN
-        (SELECT TeamId,LiteLLMRequestId FROM otel_traces WHERE {scope_sql("traces")} AND LiteLLMRequestId!='')"""
-    )
-    return f"""SELECT 'requests' AS source, request_id AS trace_id, team_id, model AS name,
-      toString(start_time) AS start_time, toUInt64(1) AS span_count, toUInt8(1) AS root_seen
-      FROM spend_logs FINAL WHERE {scope_sql(source)}
-      AND if(EngineReceivedMs>0,toInt64(EngineReceivedMs),toUnixTimestamp64Milli(end_time)) >= {{start:UInt64}}
-      AND EngineReceivedMs < {{end:UInt64}}
-      AND toUnixTimestamp64Milli(end_time) < {{end:UInt64}}
-      AND ({selection(settings, source)}) AND ({{service:String}}='' OR model_group={{service:String}})
-      AND NOT has(request_tags,'litellm-engine') {linked}"""
 
 
 class SourceReader:
@@ -125,31 +78,19 @@ class SourceReader:
         self.storage: Final = storage
 
     async def sample(self, scope: Scope, settings: EngineSettings, start: int, end: int) -> Sample:
-        sources: Final = ("traces", "requests") if settings.source == "both" else (settings.source,)
-        sql: Final = " UNION ALL ".join(query_for(settings, source) for source in sources)
         params: Final = MappingProxyType(
             {
                 **parameters(scope, settings.filters),
+                "source": settings.source,
                 "start": start,
                 "end": end,
                 "service": settings.service,
                 "limit": settings.sample_size,
             }
         )
-        count_rows: Final = _COUNTS.validate_python(
-            await self.storage.query(
-                f"SELECT count() AS count FROM ({sql})",
-                params,
-            )
-        )
-        rows: Final = _ROWS.validate_python(
-            await self.storage.query(
-                f"SELECT * FROM ({sql}) ORDER BY cityHash64(concat(team_id,trace_id)) LIMIT {{limit:UInt32}}",
-                params,
-            )
-        )
+        rows: Final = _ROWS.validate_python(await self.storage.lens_sample(params))
         return Sample(
-            eligible=count_rows[0].count,
+            eligible=rows[0].eligible if rows else 0,
             executions=tuple(
                 Execution(
                     id=execution_id(row.source, row.team_id, row.trace_id),
@@ -169,33 +110,14 @@ class SourceReader:
         params: Final = MappingProxyType(
             {
                 **parameters(scope, ()),
+                "source": execution.source,
                 "id": execution.trace_id,
                 "record_team": execution.team_id,
                 "cursor": cursor,
                 "offset": offset + 1,
             }
         )
-        sql: Final = (
-            f"""SELECT SpanId AS span_id, ParentSpanId AS parent_span_id, SpanName AS name,
-          ObservationType AS kind,
-          substringUTF8(concat('Input: ',Input,'\nOutput: ',Output,'\nStatus: ',StatusCode,' ',StatusMessage),
-              {{offset:UInt32}},8000) AS content,
-          lengthUTF8(concat('Input: ',Input,'\nOutput: ',Output,'\nStatus: ',StatusCode,' ',StatusMessage))
-              >= {{offset:UInt32}}+8000 AS truncated
-          FROM otel_traces WHERE {scope_sql("traces")} AND TraceId={{id:String}}
-          AND TeamId={{record_team:String}} AND SpanId > {{cursor:String}}
-          ORDER BY SpanId LIMIT 1 BY SpanId LIMIT 40"""
-            if execution.source == "traces"
-            else f"""
-          SELECT request_id AS span_id, '' AS parent_span_id, model AS name,'llm' AS kind,
-          substringUTF8(concat('Input: ',messages,'\nOutput: ',response,'\nError: ',error_str),
-              {{offset:UInt32}},8000) AS content,
-          lengthUTF8(concat('Input: ',messages,'\nOutput: ',response,'\nError: ',error_str))
-              >= {{offset:UInt32}}+8000 AS truncated
-          FROM spend_logs FINAL WHERE {scope_sql("requests")} AND request_id={{id:String}}
-          AND team_id={{record_team:String}} LIMIT 1"""
-        )
-        rows: Final = _PARTS.validate_python(await self.storage.query(sql, params))
+        rows: Final = _PARTS.validate_python(await self.storage.lens_content(params))
         return ExecutionContent(
             execution=execution,
             parts=tuple(
@@ -218,21 +140,12 @@ class SourceReader:
         params: Final = MappingProxyType(
             {
                 **parameters(scope, ()),
+                "source": execution.source,
                 "id": execution.trace_id,
                 "record_team": execution.team_id,
                 "span": evidence.span_id,
                 "quote": evidence.quote,
             }
         )
-        sql: Final = (
-            f"""SELECT count() AS count FROM otel_traces WHERE {scope_sql("traces")}
-            AND TraceId={{id:String}} AND TeamId={{record_team:String}} AND SpanId={{span:String}}
-            AND position(concat('Input: ',Input,'\nOutput: ',Output,'\nStatus: ',StatusCode,' ',StatusMessage),{{quote:String}})>0"""
-            if execution.source == "traces"
-            else f"""SELECT count() AS count FROM spend_logs FINAL
-            WHERE {scope_sql("requests")} AND request_id={{id:String}} AND team_id={{record_team:String}}
-            AND request_id={{span:String}}
-            AND position(concat('Input: ',messages,'\nOutput: ',response,'\nError: ',error_str),{{quote:String}})>0"""
-        )
-        rows: Final = _COUNTS.validate_python(await self.storage.query(sql, params))
+        rows: Final = _COUNTS.validate_python(await self.storage.lens_evidence(params))
         return bool(rows and rows[0].count)

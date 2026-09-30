@@ -35,6 +35,9 @@ read_queries! {
     ListTraces => "list_traces" => "list_traces.sql",
     TraceSpans => "trace_spans" => "trace_spans.sql",
     SpanDetail => "span_detail" => "span_detail.sql",
+    LensSample => "lens_sample" => "lens_sample.sql",
+    LensContent => "lens_content" => "lens_content.sql",
+    LensEvidence => "lens_evidence" => "lens_evidence.sql",
 }
 
 #[derive(Debug, Deserialize)]

@@ -39,7 +39,7 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
         "SpanAttributes": {"gen_ai.response.id": "response-1", "gen_ai.usage.input_tokens": "12"}
     }))?;
     let spend = serde_json::from_value(serde_json::json!({
-        "request_id": "request-1", "response_id": "response-1", "team_id": "team-1", "spend": 0.125,
+        "request_id": "request-1", "response_id": "response-1", "team_id": "team-1", "api_key": "hash-1", "spend": 0.125,
         "start_time": timestamp / 1_000_000, "end_time": timestamp / 1_000_000 + 100,
         "completion_start_time": null
     }))?;
@@ -126,6 +126,68 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
         response["data"],
         serde_json::json!([{"spans": 1, "tokens": 12}])
     );
+    let lens_params = BTreeMap::from([
+        ("source".to_owned(), Parameter::Text("both".to_owned())),
+        ("all_teams".to_owned(), Parameter::Integer(0)),
+        ("team".to_owned(), Parameter::Text("team-1".to_owned())),
+        ("key_hash".to_owned(), Parameter::Text("hash-1".to_owned())),
+        (
+            "start".to_owned(),
+            Parameter::Integer(timestamp / 1_000_000 - 1000),
+        ),
+        (
+            "end".to_owned(),
+            Parameter::Integer(timestamp / 1_000_000 + 1000),
+        ),
+        ("service".to_owned(), Parameter::Text(String::new())),
+        ("filter_keys".to_owned(), Parameter::Strings(vec![])),
+        ("filter_values".to_owned(), Parameter::Strings(vec![])),
+        ("limit".to_owned(), Parameter::Integer(10)),
+    ]);
+    let sample =
+        execute_named_read(&client, &connection, ReadQuery::LensSample, &lens_params).await?;
+    let sample: serde_json::Value = serde_json::from_str(&sample)?;
+    assert_eq!(sample["data"].as_array().map(Vec::len), Some(1));
+    assert_eq!(sample["data"][0]["trace_id"], "trace-1");
+    let read_params: BTreeMap<String, Parameter> = lens_params
+        .into_iter()
+        .chain([
+            ("source".to_owned(), Parameter::Text("traces".to_owned())),
+            ("id".to_owned(), Parameter::Text("trace-1".to_owned())),
+            (
+                "record_team".to_owned(),
+                Parameter::Text("team-1".to_owned()),
+            ),
+            ("cursor".to_owned(), Parameter::Text(String::new())),
+            ("offset".to_owned(), Parameter::Integer(1)),
+            ("span".to_owned(), Parameter::Text("span-1".to_owned())),
+            (
+                "quote".to_owned(),
+                Parameter::Text("hello world".to_owned()),
+            ),
+        ])
+        .collect();
+    let content =
+        execute_named_read(&client, &connection, ReadQuery::LensContent, &read_params).await?;
+    let content: serde_json::Value = serde_json::from_str(&content)?;
+    assert_eq!(content["data"][0]["span_id"], "span-1");
+    assert!(
+        content["data"][0]["content"]
+            .as_str()
+            .is_some_and(|text| text.contains("hello world"))
+    );
+    let evidence =
+        execute_named_read(&client, &connection, ReadQuery::LensEvidence, &read_params).await?;
+    let evidence: serde_json::Value = serde_json::from_str(&evidence)?;
+    assert_eq!(evidence["data"][0]["count"].as_u64(), Some(1));
+    let other_team: BTreeMap<String, Parameter> = read_params
+        .into_iter()
+        .chain([("team".to_owned(), Parameter::Text("team-2".to_owned()))])
+        .collect();
+    let denied =
+        execute_named_read(&client, &connection, ReadQuery::LensContent, &other_team).await?;
+    let denied: serde_json::Value = serde_json::from_str(&denied)?;
+    assert_eq!(denied["data"], serde_json::json!([]));
     Ok(())
 }
 

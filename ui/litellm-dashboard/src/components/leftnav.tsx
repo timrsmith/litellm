@@ -228,7 +228,7 @@ const menuGroups: MenuGroup[] = [
         ),
       },
       { key: "logs", page: "logs", label: "Logs", icon: <Activity {...ICON} /> },
-      { key: "lens", page: "lens", label: "Lens", icon: <Aperture {...ICON} /> },
+      { key: "lens", page: "lens", label: "Lens", icon: <Aperture {...ICON} />, roles: all_admin_roles },
       {
         key: "guardrails-monitor",
         page: "guardrails-monitor",

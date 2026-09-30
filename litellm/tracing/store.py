@@ -208,9 +208,8 @@ class ClickHouseTraceStore:
 
     async def insert_spans(self, rows: list[SpanRow]) -> None:
         await self.storage.insert_rows(
-            OTEL_TRACES_TABLE, [{**row, "EngineReceivedMs": int(time.time() * 1000)} for row in rows]
+            OTEL_TRACES_TABLE, [dict(row, EngineReceivedMs=int(time.time() * 1000)) for row in rows]
         )
-
 
     async def list_traces(
         self,

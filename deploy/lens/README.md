@@ -4,7 +4,7 @@ Lens reviews recorded activity and saves evidence-linked findings in the LiteLLM
 
 ## Start a worker
 
-Use a LiteLLM proxy built from this branch with PostgreSQL, [agent tracing](../../litellm/tracing/README.md), and ClickHouse configured, including the separate read-only ClickHouse account. Enable the ClickHouse callback and request/response logging to analyze LLM requests. Lens can only inspect content you actually retain
+Use a LiteLLM proxy built from this branch with PostgreSQL, agent tracing (`general_settings.tracing: {store: clickhouse}`), and ClickHouse configured through `CLICKHOUSE_URL`. Enable the ClickHouse callback and request/response logging to analyze LLM requests. Lens can only inspect content you actually retain
 
 In Lens, click **Connect worker**, then **Create worker credential**. Save the credential in a secret manager or a local environment file readable only by the operator. It is shown once
 
@@ -21,7 +21,7 @@ docker compose --env-file /path/to/lens.env -f deploy/lens/compose.yaml up -d --
 
 The worker needs outbound HTTPS access to LiteLLM. It needs no inbound ports, provider keys, direct database access, or GPU. The proxy calls your selected model through its configured router; trace content reaches that model provider. Use a model with JSON output support and known token prices. One worker handles one scan at a time and can serve multiple lenses. For more throughput, start another worker with a separate credential
 
-A worker credential has the creator's scope: an administrator can serve all lenses, a team credential can serve its team's lenses, and a teamless key can serve only its own lenses. Revoke it in the connection dialog when retiring a worker. Redeploy the worker alongside proxy upgrades so their API versions match
+V1 setup, manual runs, feedback, and worker credentials are restricted to proxy administrators. Admin viewers can inspect results. Worker credentials can serve the administrator’s lenses. Revoke it in the connection dialog when retiring a worker. Redeploy the worker alongside proxy upgrades so their API versions match
 
 ## Configure a lens
 

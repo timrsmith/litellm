@@ -96,3 +96,12 @@ class TraceStorage:
 
     async def span_detail(self, parameters: Mapping[str, object]) -> list[dict[str, JsonValue]]:
         return await self._query("span_detail", parameters)
+
+    async def lens_sample(self, parameters: Mapping[str, object]) -> Sequence[Mapping[str, JsonValue]]:
+        return await self._query("lens_sample", parameters)
+
+    async def lens_content(self, parameters: Mapping[str, object]) -> Sequence[Mapping[str, JsonValue]]:
+        return await self._query("lens_content", parameters)
+
+    async def lens_evidence(self, parameters: Mapping[str, object]) -> Sequence[Mapping[str, JsonValue]]:
+        return await self._query("lens_evidence", parameters)

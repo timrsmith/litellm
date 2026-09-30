@@ -56,8 +56,8 @@ def source_reader() -> SourceReader:
 
 
 def user_scope(auth: UserAPIKeyAuth, write: bool = False) -> Scope:
-    if write and auth.user_role in (LitellmUserRoles.PROXY_ADMIN_VIEW_ONLY, LitellmUserRoles.INTERNAL_USER_VIEW_ONLY):
-        raise HTTPException(403, "This account has read-only access")
+    if write and auth.user_role != LitellmUserRoles.PROXY_ADMIN:
+        raise HTTPException(403, "Only proxy admins can configure or run Lens")
     if auth.user_role in (LitellmUserRoles.PROXY_ADMIN, LitellmUserRoles.PROXY_ADMIN_VIEW_ONLY):
         return Scope(all_teams=True)
     if auth.team_id:
