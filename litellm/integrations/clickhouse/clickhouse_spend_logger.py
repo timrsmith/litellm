@@ -164,6 +164,8 @@ class ClickHouseSpendLogger(ClickHouseBatchLogger):
             payload = kwargs.get("standard_logging_object")
             if payload is None or _is_trace_ingest(payload):
                 return
-            self.enqueue([{**spend_log_row_from_payload(payload, kwargs), "EngineReceivedMs": int(time.time() * 1000)}])
+            self.enqueue(
+                [{**spend_log_row_from_payload(payload, kwargs), "EngineReceivedMs": int(time.time() * 1000)}]
+            )  # mutable-ok: [LIT002] batch logger requires a list of dictionaries
         except Exception as e:
             verbose_logger.exception("ClickHouseSpendLogger: failed to log request: %s", e)
