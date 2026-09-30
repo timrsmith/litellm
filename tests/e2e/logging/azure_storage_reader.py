@@ -31,6 +31,7 @@ from azure.storage.filedatalake import DataLakeServiceClient
 from pydantic import BaseModel, ConfigDict
 
 from e2e_config import POLL_INTERVAL, POLL_TIMEOUT
+from litellm.integrations.azure_storage.azure_storage import adls_safe_file_name
 
 DEFAULT_ENDPOINT_SUFFIX = "core.windows.net"
 
@@ -68,7 +69,8 @@ class AzureStorageLogReader:
             return [
                 path.name
                 for path in fs_client.get_paths()
-                if path.name == f"{response_id}.json" or path.name.endswith(f"/{response_id}.json")
+                if path.name == adls_safe_file_name(response_id)
+                or path.name.endswith(f"/{adls_safe_file_name(response_id)}")
             ]
         except ResourceNotFoundError:
             return []
@@ -98,8 +100,8 @@ class AzureStorageLogReader:
                 return self.read_record(paths[0])
             time.sleep(interval)
         pytest.fail(
-            f"no azure_storage object {response_id}.json (under {_candidate_days()} for account-key "
-            f"auth, at the filesystem root for Entra ID auth) reached the filesystem within {timeout}s"
+            f"no azure_storage object {adls_safe_file_name(response_id)} (under {_candidate_days()} for "
+            f"account-key auth, at the filesystem root for Entra ID auth) reached the filesystem within {timeout}s"
         )
 
 
