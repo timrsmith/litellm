@@ -25,7 +25,7 @@ V1 setup, manual runs, feedback, and worker credentials are restricted to proxy 
 
 ## Configure a lens
 
-Choose traces, requests, or both. Leave service and filters blank for all activity your account can access. Filters are exact, top-level key/value matches, combined with AND. Trace filters match span or resource attributes on the same span. Request filters match logged metadata; `tag=value` matches request tags. `swarm=research` works only if your instrumentation records that attribute
+Choose traces, requests, or both. Leave service and filters blank for all activity your account can access. Filters are exact key/value matches, combined with AND. Trace filters match span or resource attributes on the same span. Request filters match logged metadata, including caller metadata stored under `requester_metadata`; `tag=value` matches request tags. `swarm=research` works only if your instrumentation records that attribute
 
 Write a few questions, give context about a successful run, choose a model, and set the monthly limit and sample size. Creation queues the first scan over the last 24 hours. Background checks default to every 15 minutes. **Analyze now** checks activity since the last successful scan; **Recheck the last 24 hours** revisits recent history. The runs API accepts `lookback_hours` from 1 to 720 for other historical windows
 
@@ -39,7 +39,7 @@ A trace is spans sharing a trace ID within one team, not an automatically recons
 
 The worker screens a deterministic sample, at most the configured 1–500 executions. For each execution it reads up to 160 spans, with 8,000 characters per span section, and splits these into model calls. It groups the observations, then investigates at most 10 candidate patterns using up to five model turns each. The investigator can read more original content from the selected executions. It has no shell, browsing, code-editing, or production-action tools
 
-Both the worker and proxy validate quoted evidence. Findings retain exact quotes and open the source trace or request. Resolve a finding after a fix, or dismiss it with a reason. A resolved finding reopens when new execution IDs support the same pattern; dismissed findings remain dismissed
+Each model response must match a bounded JSON schema. A malformed response gets one repair attempt through the same budget controls; repeated invalid output fails the scan. Both the worker and proxy validate quoted evidence. Findings retain exact quotes and open the source trace or request. Resolve a finding after a fix, or dismiss it with a reason. A resolved finding reopens when new execution IDs support the same pattern; dismissed findings remain dismissed
 
 Coverage distinguishes eligible, sampled, reviewed, partial, and unassessable executions. Findings describe observations in the sample, not population-wide success rates or proven causes. A root span does not prove that a trace contains every expected span. Long, missing, redacted, or expired content limits the conclusions
 
