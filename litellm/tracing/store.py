@@ -7,7 +7,8 @@ Reads join agent spans (otel_traces) to LiteLLM requests (spend_logs) on
 
 import base64
 import json
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -49,7 +50,7 @@ def decode_cursor(cursor: str | None) -> tuple[int, str]:
 
 
 def _iso(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat()
 
 
 def _status(code: str) -> SpanStatus:
@@ -206,7 +207,10 @@ class ClickHouseTraceStore:
         self.storage = storage
 
     async def insert_spans(self, rows: list[SpanRow]) -> None:
-        await self.storage.insert_rows(OTEL_TRACES_TABLE, [dict(row) for row in rows])
+        await self.storage.insert_rows(
+            OTEL_TRACES_TABLE, [{**row, "EngineReceivedMs": int(time.time() * 1000)} for row in rows]
+        )
+
 
     async def list_traces(
         self,

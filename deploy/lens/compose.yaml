@@ -1,0 +1,12 @@
+services:
+  lens-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/lens/Dockerfile
+    environment:
+      LITELLM_URL: ${LITELLM_URL:?Set the URL reachable from this container}
+      LENS_WORKER_TOKEN: ${LENS_WORKER_TOKEN:?Create a worker credential in the Lens UI}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

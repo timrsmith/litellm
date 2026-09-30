@@ -23,6 +23,7 @@ import {
 } from "@/components/shared/Sidebar";
 import {
   Activity,
+  Aperture,
   BarChart3,
   Bell,
   Blocks,
@@ -227,6 +228,7 @@ const menuGroups: MenuGroup[] = [
         ),
       },
       { key: "logs", page: "logs", label: "Logs", icon: <Activity {...ICON} /> },
+      { key: "lens", page: "lens", label: "Lens", icon: <Aperture {...ICON} /> },
       {
         key: "guardrails-monitor",
         page: "guardrails-monitor",

@@ -7,6 +7,7 @@ so `response_id` is always the raw provider response id (cache-hit suffix stripp
 
 import json
 import re
+import time
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, Final
@@ -163,6 +164,6 @@ class ClickHouseSpendLogger(ClickHouseBatchLogger):
             payload = kwargs.get("standard_logging_object")
             if payload is None or _is_trace_ingest(payload):
                 return
-            self.enqueue([dict(spend_log_row_from_payload(payload, kwargs))])  # mutable-ok: [LIT002] batch logger API
+            self.enqueue([{**spend_log_row_from_payload(payload, kwargs), "EngineReceivedMs": int(time.time() * 1000)}])
         except Exception as e:
             verbose_logger.exception("ClickHouseSpendLogger: failed to log request: %s", e)

@@ -3,11 +3,13 @@ use litellm_http::Client;
 use crate::Connection;
 use crate::Error;
 
-const MIGRATIONS: [&str; 4] = [
+const MIGRATIONS: [&str; 6] = [
     include_str!("../migrations/0001_otel_traces.sql"),
     include_str!("../migrations/0002_agent_traces.sql"),
     include_str!("../migrations/0003_agent_traces_mv.sql"),
     include_str!("../migrations/0004_spend_logs.sql"),
+    include_str!("../migrations/0005_trace_received.sql"),
+    include_str!("../migrations/0006_spend_received.sql"),
 ];
 
 pub fn schema_statements(
