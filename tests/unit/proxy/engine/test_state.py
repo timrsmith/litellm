@@ -95,3 +95,22 @@ def test_monthly_budget_renews_without_erasing_job_costs() -> None:
     assert renewed.spent == 0
     assert renewed.jobs == spent.jobs
     assert renew_budget(spent, NOW) is spent
+
+
+@pytest.mark.parametrize("hours", (24, 168, 720))
+def test_initial_scan_uses_selected_history_then_continues_from_last_scan(hours: int) -> None:
+    original: Final = engine()
+    configured: Final = original.model_copy(
+        update={"settings": original.settings.model_copy(update={"lookback_hours": hours})}
+    )
+    first: Final = queue_job(configured, NOW, "first")
+    assert first.jobs[0].start == NOW - timedelta(hours=hours, minutes=5)
+    resumed: Final = configured.model_copy(update={"last_scan_at": NOW - timedelta(hours=1)})
+    assert queue_job(resumed, NOW, "next").jobs[0].start == NOW - timedelta(hours=1, minutes=5)
+
+
+def test_finding_keeps_uncertainty_separate_from_the_main_summary() -> None:
+    draft: Final = finding("run1").model_copy(update={"limitation": "The final response was not recorded."})
+    saved: Final = merge_finding(engine(), draft, 1, NOW)
+    assert saved.limitation == draft.limitation
+    assert saved.description == draft.description

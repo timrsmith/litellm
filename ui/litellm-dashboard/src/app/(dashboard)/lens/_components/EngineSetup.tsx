@@ -12,8 +12,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { apiClient } from "@/components/networking";
-import { filtersFromText, starterQuestions, type Sample, type Settings } from "./engineData";
+import { ActivityScope, type ActivitySelection } from "./ActivityScope";
+import { normalizeFilters, starterQuestions, type Settings } from "./engineData";
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm";
 
@@ -33,27 +33,28 @@ export function EngineSetup({
   const [step, setStep] = useState(0);
   const [name, setName] = useState(initial?.name ?? "");
   const [source, setSource] = useState<Settings["source"]>(initial?.source ?? "traces");
+  const [lookback, setLookback] = useState(initial?.lookback_hours ?? 24);
   const [service, setService] = useState(initial?.service ?? "");
-  const [filters, setFilters] = useState(initial?.filters?.map((f) => `${f.key}=${f.value}`).join("\n") ?? "");
+  const [filters, setFilters] = useState<NonNullable<Settings["filters"]>>(initial?.filters ?? []);
   const [context, setContext] = useState(initial?.context ?? "");
   const [questions, setQuestions] = useState(
     initial?.checks.map((c) => c.instruction).join("\n") ?? starterQuestions.join("\n"),
   );
-  const [model, setModel] = useState(initial?.model ?? models[0] ?? "");
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [model, setModel] = useState(initial?.model ?? "");
+  const [enabled, setEnabled] = useState(initial?.enabled ?? false);
   const [budget, setBudget] = useState(initial?.monthly_budget ?? 20);
   const [sampleSize, setSampleSize] = useState(initial?.sample_size ?? 100);
   const [interval, setInterval] = useState(initial?.interval_minutes ?? 15);
-  const [preview, setPreview] = useState<Sample | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const settings = (): Settings => ({
     name: name.trim(),
     source,
+    lookback_hours: lookback,
     service: service.trim(),
     context,
-    filters: filtersFromText(filters),
+    filters: normalizeFilters(filters),
     model,
     enabled,
     monthly_budget: budget,
@@ -80,7 +81,7 @@ export function EngineSetup({
   };
   const next = () => {
     try {
-      filtersFromText(filters);
+      normalizeFilters(filters);
       if (!name.trim()) throw new Error("Give this lens a name");
       if (step === 1 && !questions.trim()) throw new Error("Add at least one question");
       setError("");
@@ -90,6 +91,12 @@ export function EngineSetup({
     }
   };
 
+  const changeSelection = (selection: ActivitySelection) => {
+    setSource(selection.source);
+    setLookback(selection.lookback_hours ?? 24);
+    setService(selection.service ?? "");
+    setFilters(selection.filters ?? []);
+  };
   const saveLabel = () => {
     if (busy) return "Saving…";
     if (initial) return "Save changes";
@@ -102,7 +109,7 @@ export function EngineSetup({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit lens" : "Set up a lens"}</DialogTitle>
           <DialogDescription>
@@ -110,13 +117,13 @@ export function EngineSetup({
               [
                 "Choose the activity you want to understand",
                 "Tell Lens what matters to you",
-                "Choose when to analyze and how much to spend",
+                "Review your selection and start analysis",
               ][step]
             }
           </DialogDescription>
         </DialogHeader>
         <div className="flex gap-2" aria-label={`Step ${step + 1} of 3`}>
-          {["Activity", "Questions", "Monitoring"].map((label, i) => (
+          {["Activity", "Questions", "Review & run"].map((label, i) => (
             <div
               key={label}
               className={`flex-1 border-t-2 pt-2 text-xs ${i <= step ? "border-foreground text-foreground" : "border-border text-muted-foreground"}`}
@@ -125,7 +132,7 @@ export function EngineSetup({
             </div>
           ))}
         </div>
-        <div className="space-y-4">
+        <div className="min-h-0 overflow-y-auto space-y-4 pr-1">
           {step === 0 && (
             <>
               <label className="grid gap-2 text-sm">
@@ -137,80 +144,11 @@ export function EngineSetup({
                   maxLength={100}
                 />
               </label>
-              <label className="grid gap-2 text-sm">
-                Review
-                <select
-                  className={selectClass}
-                  value={source}
-                  onChange={(e) => {
-                    setSource(e.target.value as Settings["source"]);
-                    setPreview(null);
-                  }}
-                >
-                  <option value="traces">Agent traces</option>
-                  <option value="requests">LLM request logs</option>
-                  <option value="both">Agent traces and request logs</option>
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm">
-                Service or model group{" "}
-                <span className="text-xs text-muted-foreground">
-                  Optional. Leave blank to include all accessible activity.
-                </span>
-                <Input
-                  value={service}
-                  onChange={(e) => {
-                    setService(e.target.value);
-                    setPreview(null);
-                  }}
-                  placeholder="All services"
-                />
-              </label>
-              <label className="grid gap-2 text-sm">
-                Metadata filters{" "}
-                <span className="text-xs text-muted-foreground">
-                  Optional. One key=value per line. All filters must match. Use tag=value for request tags.
-                </span>
-                <Textarea
-                  value={filters}
-                  onChange={(e) => {
-                    setFilters(e.target.value);
-                    setPreview(null);
-                  }}
-                  placeholder={"environment=production\nswarm=research"}
-                  rows={3}
-                />
-              </label>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  execute(async () => {
-                    const data = await apiClient.post<Sample>("/engine/preview/sample", {
-                      accessToken,
-                      body: {
-                        settings: { ...settings(), name: name.trim() || "Preview", model: model || "preview" },
-                        lookback_hours: 24,
-                      },
-                    });
-                    setPreview(data);
-                  })
-                }
-              >
-                {busy ? "Checking…" : "Preview matching runs"}
-              </Button>
-              {preview && (
-                <div className="rounded-lg border p-3 text-sm" role="status">
-                  <p>{preview.eligible} matching executions in the last 24 hours</p>
-                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {preview.executions.slice(0, 3).map((e) => (
-                      <li key={e.id}>
-                        {e.name} · {e.span_count} steps
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <ActivityScope
+                accessToken={accessToken}
+                value={{ source, service, filters, lookback_hours: lookback }}
+                onChange={changeSelection}
+              />
             </>
           )}
           {step === 1 && (
@@ -236,6 +174,21 @@ export function EngineSetup({
           )}
           {step === 2 && (
             <>
+              <div className="rounded-lg border p-4 text-sm space-y-2">
+                <p className="font-medium">{name}</p>
+                <p>
+                  {source === "requests" ? "LLM requests" : "Agent runs"} · {service || "All services"} ·{" "}
+                  {lookback === 24 ? "Last 24 hours" : `Last ${lookback / 24} days`}
+                </p>
+                {filters.map((f) => (
+                  <p key={f.key} className="text-muted-foreground">
+                    {f.key} is {f.value}
+                  </p>
+                ))}
+                <p className="text-muted-foreground">
+                  Up to {sampleSize} matching runs · {questions.split("\n").filter((q) => q.trim()).length} questions
+                </p>
+              </div>
               <label className="grid gap-2 text-sm">
                 Analysis model
                 <select className={selectClass} value={model} onChange={(e) => setModel(e.target.value)}>
@@ -293,7 +246,7 @@ export function EngineSetup({
               <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
                 {initial
                   ? "Changes apply to future scans. You can recheck recent runs from the lens page."
-                  : "The first scan reviews the last 24 hours. New activity becomes eligible after two minutes. You can leave this page while it runs."}{" "}
+                  : "The first scan reviews your selected time window. New activity becomes eligible after two minutes. You can leave this page while it runs."}{" "}
                 Larger workloads are sampled; coverage is shown with every scan.
               </div>
             </>

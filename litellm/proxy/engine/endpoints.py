@@ -225,7 +225,7 @@ async def preview_sample(body: Preview, auth: Auth) -> Sample:
         user_scope(auth),
         body.settings,
         int((now - timedelta(hours=body.lookback_hours)).timestamp() * 1000),
-        int(now.timestamp() * 1000),
+        int((now - timedelta(minutes=2)).timestamp() * 1000),
     )
 
 

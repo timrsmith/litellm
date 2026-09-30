@@ -29,6 +29,7 @@ class EngineSettings(Record):
     name: str = Field(min_length=1, max_length=100)
     context: str = Field(default="", max_length=6000)
     source: Literal["traces", "requests", "both"] = "traces"
+    lookback_hours: int = Field(default=24, ge=1, le=720)
     service: str = Field(default="", max_length=200)
     filters: tuple[MetadataFilter, ...] = Field(default=(), max_length=8)
     checks: tuple[Check, ...] = Field(min_length=1, max_length=12)
@@ -58,6 +59,7 @@ class FindingDraft(Record):
     kind: Literal["issue", "pattern"] = "issue"
     priority: Literal["high", "medium", "low"] = "medium"
     suggestion: str = Field(default="", max_length=2000)
+    limitation: str = Field(default="", max_length=600)
     evidence: tuple[Evidence, ...] = Field(min_length=1, max_length=20)
     existing_finding_id: str | None = None
 
@@ -93,6 +95,8 @@ class Execution(Record):
     start_time: str
     span_count: int
     root_seen: bool = False
+    service: str = ""
+    metadata: tuple[MetadataFilter, ...] = ()
 
 
 class TracePart(Record):

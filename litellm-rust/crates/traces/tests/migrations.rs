@@ -35,7 +35,7 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
     let span = serde_json::from_value(serde_json::json!({
         "Timestamp": timestamp, "TraceId": "trace-1", "SpanId": "span-1", "ParentSpanId": "",
         "ServiceName": "proxy", "SpanName": "request", "Input": "hello world",
-        "ResourceAttributes": {"litellm.team_id": "team-1", "litellm.api_key_hash": "hash-1"},
+        "ResourceAttributes": {"litellm.team_id": "team-1", "litellm.api_key_hash": "hash-1", "run.name": "Research report", "swarm": "research"},
         "SpanAttributes": {"gen_ai.response.id": "response-1", "gen_ai.usage.input_tokens": "12"}
     }))?;
     let spend = serde_json::from_value(serde_json::json!({
@@ -150,6 +150,14 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
     let sample: serde_json::Value = serde_json::from_str(&sample)?;
     assert_eq!(sample["data"].as_array().map(Vec::len), Some(1));
     assert_eq!(sample["data"][0]["trace_id"], "trace-1");
+    assert_eq!(sample["data"][0]["name"], "Research report");
+    assert_eq!(sample["data"][0]["service"], "proxy");
+    assert!(
+        sample["data"][0]["attributes"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(["swarm", "research"]))
+    );
     let request_params: BTreeMap<String, Parameter> = lens_params
         .into_iter()
         .chain([
@@ -168,6 +176,12 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
         execute_named_read(&client, &connection, ReadQuery::LensSample, &request_params).await?;
     let requests: serde_json::Value = serde_json::from_str(&requests)?;
     assert_eq!(requests["data"].as_array().map(Vec::len), Some(1));
+    assert!(
+        requests["data"][0]["attributes"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(["swarm", "research"]))
+    );
     assert_eq!(requests["data"][0]["trace_id"], "request-1");
     let read_params: BTreeMap<String, Parameter> = request_params
         .into_iter()

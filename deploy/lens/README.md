@@ -25,11 +25,17 @@ V1 setup, manual runs, feedback, and worker credentials are restricted to proxy 
 
 ## Configure a lens
 
-Choose traces, requests, or both. Leave service and filters blank for all activity your account can access. Filters are exact key/value matches, combined with AND. Trace filters match span or resource attributes on the same span. Request filters match logged metadata, including caller metadata stored under `requester_metadata`; `tag=value` matches request tags. `swarm=research` works only if your instrumentation records that attribute
+Choose agent runs, individual LLM requests, or both. The matching-activity preview updates as you choose a service and add metadata conditions. It shows run names, timestamps, and trace IDs; open a run to inspect its original steps before starting analysis. Suggestions come from up to 100 recent executions and may not include every recorded attribute. You can enter other exact keys and values. Leave service and filters blank for all activity your account can access. Filters are exact key/value matches, combined with AND. Trace filters match span or resource attributes on the same span. Request filters match logged metadata, including caller metadata stored under `requester_metadata`; `tag=value` matches request tags. `swarm=research` works only if your instrumentation records that attribute
 
-Write a few questions, give context about a successful run, choose a model, and set the monthly limit and sample size. Creation queues the first scan over the last 24 hours. Background checks default to every 15 minutes. **Analyze now** checks activity since the last successful scan; **Recheck the last 24 hours** revisits recent history. The runs API accepts `lookback_hours` from 1 to 720 for other historical windows
+Write a few questions, give context about a successful run, choose a model, and set the monthly limit and sample size. Choose the initial time window: 24 hours, 7 days, or 30 days. Creation queues the first scan over that window. New lenses run once by default; opt into background monitoring for checks every 15 minutes, hourly, or daily. **Analyze now** checks activity since the last successful scan; **Recheck the last 24 hours** revisits recent history. The runs API accepts `lookback_hours` from 1 to 720 for other historical windows
 
 Pausing stops future scheduled scans; cancel the active scan separately if needed. Closing the browser does not stop the worker. Configuration edits apply to the next scan. A running scan retains its settings and selected execution IDs across retries
+
+## Read the results
+
+Needs attention shows issues, highest priority first. Patterns contains useful trends and successful behavior that may not need a fix. Each finding starts with a short explanation and a next step when useful. Expand the limitations for uncertainty and counterexamples. Evidence is grouped by run and collapsed until you need it; each quote opens the original step
+
+The Runs tab lists the actual sample frozen for the latest scan. Linked-run counts on findings include cited counterexamples, so they are not failure counts. The Scans tab shows history and coverage. Existing findings retain their original wording; the shorter summaries apply to new analysis
 
 ## What a scan does
 

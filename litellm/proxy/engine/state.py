@@ -30,7 +30,7 @@ def queue_job(engine: Engine, now: datetime, job_id: str, lookback_hours: int | 
     start: Final = (
         now - timedelta(hours=lookback_hours)
         if lookback_hours is not None
-        else (engine.last_scan_at or now - timedelta(hours=24)) - timedelta(minutes=5)
+        else (engine.last_scan_at or now - timedelta(hours=engine.settings.lookback_hours)) - timedelta(minutes=5)
     )
     job: Final = Job(
         id=job_id,
@@ -100,6 +100,7 @@ def merge_finding(engine: Engine, draft: FindingDraft, revision: int, now: datet
             kind=draft.kind,
             priority=draft.priority,
             suggestion=draft.suggestion,
+            limitation=draft.limitation,
             evidence=draft.evidence,
             existing_finding_id=draft.existing_finding_id,
             id=identity,

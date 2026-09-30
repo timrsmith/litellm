@@ -1,7 +1,11 @@
 SELECT *, count() OVER () AS eligible FROM (
     SELECT 'traces' AS source, TraceId AS trace_id, TeamId AS team_id,
-        argMin(SpanName, Timestamp) AS name, toString(min(Timestamp)) AS start_time,
-        uniqExact(SpanId) AS span_count, countIf(ParentSpanId='') > 0 AS root_seen
+        coalesce(nullIf(argMin(ResourceAttributes['run.name'], Timestamp), ''),
+            argMin(SpanName, Timestamp)) AS name, toString(min(Timestamp)) AS start_time,
+        uniqExact(SpanId) AS span_count, countIf(ParentSpanId='') > 0 AS root_seen,
+        argMin(ServiceName, Timestamp) AS service,
+        arrayZip(mapKeys(argMin(mapConcat(ResourceAttributes, SpanAttributes), tuple(ParentSpanId!='',Timestamp))),
+            mapValues(argMin(mapConcat(ResourceAttributes, SpanAttributes), tuple(ParentSpanId!='',Timestamp)))) AS attributes
     FROM otel_traces
     WHERE {source:String} IN ('traces','both')
       AND ({all_teams:UInt8}=1 OR TeamId={team:String})
@@ -21,7 +25,10 @@ SELECT *, count() OVER () AS eligible FROM (
            AND ({service:String}='' OR ServiceName={service:String})) > 0
     UNION ALL
     SELECT 'requests' AS source, request_id AS trace_id, team_id, model AS name,
-        toString(start_time) AS start_time, toUInt64(1) AS span_count, toUInt8(1) AS root_seen
+        toString(start_time) AS start_time, toUInt64(1) AS span_count, toUInt8(1) AS root_seen,
+        model_group AS service,
+        arrayConcat(JSONExtractKeysAndValues(metadata, 'requester_metadata', 'String'),
+            arrayMap(t -> tuple('tag', t), request_tags)) AS attributes
     FROM spend_logs FINAL
     WHERE {source:String} IN ('requests','both')
       AND ({all_teams:UInt8}=1 OR team_id={team:String})

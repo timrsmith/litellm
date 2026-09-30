@@ -13,15 +13,24 @@ export const starterQuestions = [
   "Identify recurring user needs and successful ways the agent handles them.",
 ];
 
-export function filtersFromText(text: string): Settings["filters"] {
-  return text
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => {
-      const separator = line.indexOf("=");
-      if (separator < 1 || !line.slice(separator + 1).trim()) throw new Error("Write each filter as key=value");
-      return { key: line.slice(0, separator).trim(), value: line.slice(separator + 1).trim() };
-    });
+export function normalizeFilters(filters: NonNullable<Settings["filters"]>): Settings["filters"] {
+  return filters.map((f) => {
+    if (!f.key.trim() || !f.value.trim()) throw new Error("Choose a key and value for every condition, or remove it");
+    return { key: f.key.trim(), value: f.value.trim() };
+  });
+}
+
+export function runTime(value: string): string {
+  const date = new Date(value.includes("T") ? value : value.replace(" ", "T").slice(0, 23) + "Z");
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+export function sortedFindings(findings: Finding[]): Finding[] {
+  const rank = { high: 0, medium: 1, low: 2 };
+  return [...findings].sort(
+    (a, b) =>
+      rank[a.priority ?? "medium"] - rank[b.priority ?? "medium"] || Date.parse(b.last_seen) - Date.parse(a.last_seen),
+  );
 }
 
 export function engineStatus(engine: Engine, connected: boolean): string {

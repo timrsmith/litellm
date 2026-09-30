@@ -33,6 +33,8 @@ class ExecutionRow(BaseModel):
     span_count: int
     root_seen: int
     eligible: int
+    service: str = ""
+    attributes: tuple[tuple[str, str], ...] = ()
 
 
 class PartRow(BaseModel):
@@ -101,6 +103,12 @@ class SourceReader:
                     start_time=row.start_time,
                     span_count=row.span_count,
                     root_seen=bool(row.root_seen),
+                    service=row.service,
+                    metadata=tuple(
+                        MetadataFilter(key=k, value=v)
+                        for k, v in row.attributes
+                        if 0 < len(k) <= 200 and 0 < len(v) <= 500
+                    ),
                 )
                 for row in rows
             ),

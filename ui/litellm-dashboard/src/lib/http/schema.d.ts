@@ -30637,6 +30637,11 @@ export interface components {
              * @default 15
              */
             interval_minutes: number;
+            /**
+             * Lookback Hours
+             * @default 24
+             */
+            lookback_hours: number;
             /** Model */
             model: string;
             /**
@@ -30761,6 +30766,11 @@ export interface components {
         Execution: {
             /** Id */
             id: string;
+            /**
+             * Metadata
+             * @default []
+             */
+            metadata: components["schemas"]["MetadataFilter"][];
             /** Name */
             name: string;
             /**
@@ -30768,6 +30778,11 @@ export interface components {
              * @default false
              */
             root_seen: boolean;
+            /**
+             * Service
+             * @default
+             */
+            service: string;
             /**
              * Source
              * @enum {string}
@@ -31004,6 +31019,11 @@ export interface components {
              */
             last_seen: string;
             /**
+             * Limitation
+             * @default
+             */
+            limitation: string;
+            /**
              * Occurrences
              * @default []
              */
@@ -31051,6 +31071,11 @@ export interface components {
              * @enum {string}
              */
             kind: "issue" | "pattern";
+            /**
+             * Limitation
+             * @default
+             */
+            limitation: string;
             /**
              * Priority
              * @default medium

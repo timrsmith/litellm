@@ -12,9 +12,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/components/networking";
 import { TraceDrawer } from "@/components/view_logs/TraceView/TraceDrawer";
 import { EngineSetup } from "./EngineSetup";
+import { RunList } from "./ActivityScope";
 import { EngineProgress } from "./EngineProgress";
 import { WorkerSetup } from "./WorkerSetup";
-import { engineStatus, evidenceTarget, type Engine, type EngineList, type Finding, type Settings } from "./engineData";
+import {
+  engineStatus,
+  evidenceTarget,
+  sortedFindings,
+  runTime,
+  type Engine,
+  type EngineList,
+  type Finding,
+  type Settings,
+} from "./engineData";
 
 const money = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 3 }).format(n);
@@ -39,16 +49,25 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
     queryKey: ["engine-models", accessToken],
     queryFn: () => apiClient.get<{ data: { id: string }[] }>("/models", { accessToken }),
   });
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("lens"),
+  );
+  const selectLens = (id: string) => {
+    setSelected(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("lens", id);
+    window.history.replaceState(window.history.state, "", url);
+  };
   const [editing, setEditing] = useState<"new" | "edit" | null>(null);
   const [workerSetup, setWorkerSetup] = useState(false);
   const [findingId, setFindingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("open");
+  const [kind, setKind] = useState<"issue" | "pattern">("issue");
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [evidence, setEvidence] = useState<{ id: string; span: string } | null>(null);
-  const engines = query.data?.engines ?? [];
+  const engines = [...(query.data?.engines ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   const showEmpty = !query.isLoading && !query.error && engines.length === 0;
   const engine = engines.find((e) => e.id === selected) ?? engines[0];
   const finding = engine?.findings?.find((f) => f.id === findingId);
@@ -57,6 +76,17 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
   const job = engine?.jobs?.[0];
   const lastCompleted = engine?.jobs?.find((j) => j.status === "completed");
   const active = engine?.jobs?.find((j) => j.status === "queued" || j.status === "running");
+  const visibleFindings = sortedFindings(
+    (engine?.findings ?? []).filter((f) => (filter === "all" || f.status === filter) && f.kind === kind),
+  );
+  const sampledRuns = engine?.jobs?.flatMap((j) => j.sample?.executions ?? []) ?? [];
+  const evidenceGroups = finding
+    ? [...new Set(finding.evidence.map((e) => e.execution_id))].map((id) => ({
+        id,
+        run: sampledRuns.find((r) => r.id === id),
+        quotes: finding.evidence.filter((e) => e.execution_id === id),
+      }))
+    : [];
   const target = evidence ? evidenceTarget(evidence.id) : null;
   const [requestOffset, setRequestOffset] = useState(0);
   const requestEvidence = useQuery({
@@ -89,7 +119,7 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
       editing === "edit" ? `/engine/${engine.id}` : "/engine",
       { accessToken, body: settings },
     );
-    setSelected(saved.id);
+    selectLens(saved.id);
     setEditing(null);
     refresh();
   };
@@ -170,7 +200,7 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
               <button
                 key={e.id}
                 onClick={() => {
-                  setSelected(e.id);
+                  selectLens(e.id);
                   setFindingId(null);
                 }}
                 aria-current={engine.id === e.id ? "page" : undefined}
@@ -274,49 +304,72 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
               <TabsList variant="line">
                 <TabsTrigger value="findings">Findings</TabsTrigger>
                 <TabsTrigger value="checks">Questions & checks</TabsTrigger>
-                <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="runs">Runs</TabsTrigger>
+                <TabsTrigger value="activity">Scans</TabsTrigger>
               </TabsList>
               <TabsContent value="findings" className="pt-4 space-y-4">
-                <div className="flex gap-2">
-                  {["open", "resolved", "dismissed", "all"].map((f) => (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex gap-1" aria-label="Finding category">
                     <Button
-                      key={f}
                       size="sm"
-                      variant={filter === f ? "secondary" : "ghost"}
-                      onClick={() => setFilter(f)}
-                      className="capitalize"
+                      variant={kind === "issue" ? "secondary" : "ghost"}
+                      onClick={() => setKind("issue")}
                     >
-                      {f}
+                      Needs attention (
+                      {engine.findings?.filter((f) => f.kind === "issue" && f.status === "open").length ?? 0})
                     </Button>
-                  ))}
+                    <Button
+                      size="sm"
+                      variant={kind === "pattern" ? "secondary" : "ghost"}
+                      onClick={() => setKind("pattern")}
+                    >
+                      Patterns (
+                      {engine.findings?.filter((f) => f.kind === "pattern" && f.status === "open").length ?? 0})
+                    </Button>
+                  </div>
+                  <select
+                    aria-label="Finding status"
+                    className="rounded-md border bg-background px-2 py-1 text-xs"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  >
+                    <option value="open">Open</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="dismissed">Dismissed</option>
+                    <option value="all">All statuses</option>
+                  </select>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {kind === "issue"
+                    ? "Problems worth investigating, highest priority first."
+                    : "Useful behavior and trends. These do not necessarily need a fix."}
+                </p>
                 <div className="divide-y rounded-xl border">
-                  {engine.findings
-                    ?.filter((f) => filter === "all" || f.status === filter)
-                    .map((f) => (
-                      <button
-                        key={f.id}
-                        onClick={() => {
-                          setFindingId(f.id);
-                          setReason(f.reason ?? "");
-                        }}
-                        className="flex w-full gap-4 p-4 text-left hover:bg-muted/30"
-                      >
-                        <span
-                          className={`mt-1 size-2 shrink-0 rounded-full ${priorityColors[f.priority ?? "medium"]}`}
-                          aria-label={`${f.priority} priority`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">{f.title}</p>
-                          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{f.description}</p>
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {f.occurrences?.length ?? 0} observed executions · {f.kind} · {when(f.last_seen)}
-                          </p>
-                        </div>
-                        <ArrowUpRight className="size-4 text-muted-foreground" />
-                      </button>
-                    ))}
-                  {!engine.findings?.some((f) => filter === "all" || f.status === filter) && (
+                  {visibleFindings.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        setFindingId(f.id);
+                        setReason(f.reason ?? "");
+                      }}
+                      className="flex w-full gap-4 p-4 text-left hover:bg-muted/30"
+                    >
+                      <span
+                        className={`mt-1 size-2 shrink-0 rounded-full ${priorityColors[f.priority ?? "medium"]}`}
+                        aria-label={`${f.priority} priority`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{f.title}</p>
+                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{f.description}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {f.occurrences?.length ?? 0} linked runs ·{" "}
+                          {f.kind === "issue" ? `${f.priority} priority` : "Pattern"}
+                        </p>
+                      </div>
+                      <ArrowUpRight className="size-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                  {visibleFindings.length === 0 && (
                     <div className="px-6 py-14 text-center">
                       <CheckCircle2 className="mx-auto mb-3 size-5 text-muted-foreground" />
                       <p className="text-sm font-medium">{emptyFindingTitle(!!active, !!engine.last_scan_at)}</p>
@@ -383,6 +436,56 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
                   Changes apply to future scans. Rechecking history uses your analysis budget.
                 </p>
               </TabsContent>
+              <TabsContent value="runs" className="pt-4 space-y-4">
+                <div className="rounded-lg border p-4 text-sm space-y-2">
+                  <p className="font-medium">Activity this lens reviews</p>
+                  <p>
+                    {sourceLabels[engine.settings.source ?? "traces"]} · {engine.settings.service || "All services"}
+                  </p>
+                  {engine.settings.filters?.map((f) => (
+                    <p key={f.key} className="text-muted-foreground">
+                      {f.key} is {f.value}
+                    </p>
+                  ))}
+                  {!readOnly && (
+                    <Button variant="outline" size="sm" onClick={() => setEditing("edit")}>
+                      Change selection
+                    </Button>
+                  )}
+                </div>
+                <p className="text-sm font-medium">
+                  {active ? "Runs selected for this scan" : "Runs from the last scan"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {job?.sample?.executions.length ?? 0} selected from {job?.sample?.eligible ?? 0} matches. Open a run
+                  to inspect its original activity.
+                </p>
+                <div className="max-h-[480px] overflow-y-auto rounded-lg border px-4 divide-y">
+                  {job?.sample?.executions.map((run) => (
+                    <div key={run.id} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <RunList executions={[run]} />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setRequestOffset(0);
+                          setEvidence({ id: run.id, span: "" });
+                        }}
+                      >
+                        Open {run.source === "traces" ? "run" : "request"}
+                        <ArrowUpRight className="size-3" />
+                      </Button>
+                    </div>
+                  ))}
+                  {!job?.sample?.executions.length && (
+                    <p className="py-4 text-sm text-muted-foreground">
+                      The selected runs appear here when a worker starts the scan.
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
               <TabsContent value="activity" className="pt-4 space-y-3">
                 {engine.jobs?.map((j) => (
                   <div key={j.id} className="rounded-lg border p-4">
@@ -432,43 +535,71 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
           if (!open) setFindingId(null);
         }}
       >
-        <SheetContent className="overflow-y-auto sm:max-w-xl">
+        <SheetContent className="overflow-y-auto data-[side=right]:sm:max-w-2xl">
           {finding && (
             <>
               <SheetHeader>
-                <SheetTitle>{finding.title}</SheetTitle>
+                <SheetTitle className="pr-8 text-xl leading-snug">{finding.title}</SheetTitle>
                 <SheetDescription>
-                  {finding.priority} priority · {finding.status} · {finding.occurrences?.length ?? 0} observed
-                  executions
+                  {finding.kind === "issue" ? `${finding.priority} priority` : "Pattern"} ·{" "}
+                  {finding.occurrences?.length ?? 0} linked runs
                 </SheetDescription>
               </SheetHeader>
               <div className="space-y-6 p-4">
-                <p className="text-sm leading-6 whitespace-pre-wrap">{finding.description}</p>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">What happened</p>
+                  <p className="text-sm leading-6 whitespace-pre-wrap">{finding.description}</p>
+                </div>
                 {finding.suggestion && (
                   <div className="rounded-lg bg-muted/40 p-4">
-                    <p className="text-sm font-medium">Suggested next step</p>
+                    <p className="text-sm font-medium">What to do next</p>
                     <p className="mt-2 text-sm leading-6">{finding.suggestion}</p>
                   </div>
                 )}
+                {finding.limitation && (
+                  <details className="rounded-lg border p-3 text-sm">
+                    <summary className="cursor-pointer font-medium">What this does and doesn’t tell us</summary>
+                    <p className="mt-3 leading-6 text-muted-foreground">{finding.limitation}</p>
+                  </details>
+                )}
                 <div>
-                  <p className="mb-3 text-sm font-medium">Evidence</p>
-                  <div className="space-y-3">
-                    {finding.evidence.map((e, i) => (
-                      <div key={`${e.execution_id}-${e.span_id}-${i}`} className="rounded-lg border p-3">
-                        <blockquote className="text-sm whitespace-pre-wrap break-words">{e.quote}</blockquote>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2"
-                          onClick={() => {
-                            setRequestOffset(0);
-                            setEvidence({ id: e.execution_id, span: e.span_id });
-                          }}
-                        >
-                          {evidenceTarget(e.execution_id)?.source === "traces" ? "Open trace" : "Open request"}
-                          <ArrowUpRight className="size-3" />
-                        </Button>
-                      </div>
+                  <p className="text-sm font-medium">Evidence by run</p>
+                  <p className="mt-1 mb-3 text-xs text-muted-foreground">
+                    Exact quotes from the recorded activity. Linked runs can include counterexamples.
+                  </p>
+                  <div className="space-y-2">
+                    {evidenceGroups.map((group) => (
+                      <details key={group.id} className="rounded-lg border p-3">
+                        <summary className="cursor-pointer text-sm font-medium">
+                          {group.run?.name ?? evidenceTarget(group.id)?.id.slice(0, 12) ?? "Recorded run"}
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            {group.quotes.length} quotes{group.run ? ` · ${runTime(group.run.start_time)}` : ""}
+                          </span>
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          {group.quotes.map((e, i) => (
+                            <div key={`${e.span_id}-${i}`} className="rounded-md bg-muted/40 p-3">
+                              <blockquote className="text-xs leading-5 whitespace-pre-wrap break-words">
+                                {e.quote}
+                              </blockquote>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="mt-2"
+                                onClick={() => {
+                                  setRequestOffset(0);
+                                  setEvidence({ id: e.execution_id, span: e.span_id });
+                                }}
+                              >
+                                {evidenceTarget(e.execution_id)?.source === "traces"
+                                  ? "Open original step"
+                                  : "Open request"}
+                                <ArrowUpRight className="size-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
                     ))}
                   </div>
                 </div>
@@ -483,12 +614,14 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
                       />
                     </label>
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        disabled={busy}
-                        onClick={() => changeFinding(finding.status === "resolved" ? "open" : "resolved")}
-                      >
-                        {finding.status === "resolved" ? "Reopen" : "Resolve"}
-                      </Button>
+                      {finding.kind === "issue" && (
+                        <Button
+                          disabled={busy}
+                          onClick={() => changeFinding(finding.status === "resolved" ? "open" : "resolved")}
+                        >
+                          {finding.status === "resolved" ? "Reopen" : "Mark resolved"}
+                        </Button>
+                      )}
                       <Button disabled={busy} variant="outline" onClick={() => changeFinding("dismissed")}>
                         Dismiss
                       </Button>
@@ -515,7 +648,7 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
           if (!open) setEvidence(null);
         }}
       >
-        <SheetContent className="overflow-y-auto sm:max-w-xl">
+        <SheetContent className="overflow-y-auto data-[side=right]:sm:max-w-2xl">
           <SheetHeader>
             <SheetTitle>Request evidence</SheetTitle>
             <SheetDescription>Original logged input and output</SheetDescription>
