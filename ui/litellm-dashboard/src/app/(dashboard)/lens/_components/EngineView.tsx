@@ -55,6 +55,7 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
   const connected =
     query.data?.workers?.some((w) => !w.revoked && query.dataUpdatedAt - Date.parse(w.last_seen) < 120000) ?? false;
   const job = engine?.jobs?.[0];
+  const lastCompleted = engine?.jobs?.find((j) => j.status === "completed");
   const active = engine?.jobs?.find((j) => j.status === "queued" || j.status === "running");
   const target = evidence ? evidenceTarget(evidence.id) : null;
   const [requestOffset, setRequestOffset] = useState(0);
@@ -234,10 +235,11 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Last successful scan</p>
-                <p className="mt-1 text-sm">{when(engine.last_scan_at)}</p>
-                {job && (
+                <p className="mt-1 text-sm">{when(lastCompleted?.finished_at ?? engine.last_scan_at)}</p>
+                {lastCompleted && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {job.coverage?.screened ?? 0} of {job.coverage?.eligible ?? 0} eligible runs reviewed
+                    {lastCompleted.coverage?.screened ?? 0} of {lastCompleted.coverage?.eligible ?? 0} eligible runs
+                    reviewed
                   </p>
                 )}
               </div>
