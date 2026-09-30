@@ -1,0 +1,34 @@
+name: Lens Worker Image
+
+on:
+  pull_request:
+    branches: [main, litellm_oss_branch, "litellm_**"]
+    paths:
+      - deploy/lens/**
+      - litellm/proxy/engine/**
+      - .github/workflows/lens-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lens-worker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Build Lens worker
+        run: docker build -f deploy/lens/Dockerfile -t lens-worker:${{ github.sha }} .
+      - name: Verify standalone imports with a read-only filesystem
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --entrypoint python
+          lens-worker:${{ github.sha }}
+          -c 'import os; import engine.worker; assert os.getuid() == 65532'
