@@ -2,9 +2,9 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from itertools import chain
 from types import MappingProxyType
-from typing import Final, Literal, TypeAlias
+from typing import Final, Literal, TypeAlias, TypeVar
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from .models import (
     Claim,
@@ -77,6 +77,28 @@ ReportProgress: TypeAlias = Callable[
 ]
 
 
+ResponseT = TypeVar("ResponseT", bound=Record)
+
+
+async def structured_response(request: ModelRequest, schema: type[ResponseT], model: ModelCall) -> ResponseT:
+    response: Final = await model(request)
+    try:
+        return schema.model_validate_json(response.content)
+    except ValidationError as error:
+        repair: Final = request.model_copy(
+            update=MappingProxyType(
+                {
+                    "prompt": request.prompt
+                    + "\nYour previous response did not match the required JSON schema. Generate a new response "
+                    "from the original evidence, correcting these validation errors: "
+                    + error.json(include_input=False, include_url=False)
+                }
+            )
+        )
+        corrected: Final = await model(repair)
+        return schema.model_validate_json(corrected.content)
+
+
 def evidence_valid(evidence: Evidence, parts: tuple[TracePart, ...]) -> bool:
     return any(
         p.execution_id == evidence.execution_id and p.span_id == evidence.span_id and evidence.quote in p.content
@@ -100,6 +122,7 @@ def extraction_prompt(claim: Claim, execution: Execution, parts: tuple[TracePart
             "An error followed by recovery is not automatically a failed task. Missing content is unknown. "
             "Use exact quotes from supplied content. Return observations: [{check_id,summary,evidence: "
             "[{execution_id,span_id,quote}]}], cannot_assess: boolean.",
+            "response_schema": Extraction.model_json_schema(),
             "context": claim.job.settings.context,
             "questions": tuple(c.model_dump() for c in claim.job.settings.checks if c.enabled),
             "execution": execution.model_dump(),
@@ -116,15 +139,8 @@ async def extract(
     chunks: Final = partition_content(page.parts)
     outputs: Final = tuple(
         [
-            Extraction.model_validate_json(
-                (
-                    await model(
-                        ModelRequest(
-                            purpose="extract",
-                            prompt=extraction_prompt(claim, execution, chunk),
-                        )
-                    )
-                ).content
+            await structured_response(
+                ModelRequest(purpose="extract", prompt=extraction_prompt(claim, execution, chunk)), Extraction, model
             )
             for chunk in chunks
         ]
@@ -184,6 +200,7 @@ async def investigate(
             "check and same pattern. Respect dismissal reasons; no new card for dismissed expected behavior.",
             "context": claim.job.settings.context,
             "questions": tuple(c.model_dump() for c in claim.job.settings.checks if c.enabled),
+            "response_schema": Decision.model_json_schema(),
             "candidate": candidate.model_dump(),
             "reads_already_completed": tuple(r.model_dump() for r in reads),
             "catalog": tuple(e.execution.model_dump() for e in catalog),
@@ -202,9 +219,7 @@ async def investigate(
     )
     if len(prompt) > 100000:
         return Investigation(finding=None, parts=evidence)
-    decision: Final = Decision.model_validate_json(
-        (await model(ModelRequest(purpose="investigate", prompt=prompt))).content
-    )
+    decision: Final = await structured_response(ModelRequest(purpose="investigate", prompt=prompt), Decision, model)
     if decision.action == "submit" and decision.finding:
         finding: Final = decision.finding
         known: Final = frozenset(c.id for c in claim.job.settings.checks if c.enabled)
@@ -253,23 +268,22 @@ async def analyze_sample(
     batches: Final = observation_batches(observations)
     clusters: Final = tuple(
         [
-            Clusters.model_validate_json(
-                (
-                    await model(
-                        ModelRequest(
-                            purpose="cluster",
-                            prompt=json.dumps(
-                                {  # mutable-ok: JSON encoder requires a dictionary
-                                    "task": "Group observations into up to 5 distinct useful patterns for the supplied questions. "
-                                    "Keep different causes separate. Return candidates:[{check_id,title,hypothesis,execution_ids,existing_finding_id:null}]. "
-                                    "Use only provided execution IDs. A candidate is a hypothesis, not a verified finding.",
-                                    "observations": tuple(o.model_dump() for o in batch),
-                                },
-                                ensure_ascii=False,
-                            ),
-                        )
-                    )
-                ).content
+            await structured_response(
+                ModelRequest(
+                    purpose="cluster",
+                    prompt=json.dumps(
+                        {  # mutable-ok: JSON encoder requires a dictionary
+                            "task": "Group observations into up to 5 distinct useful patterns for the supplied questions. "
+                            "Keep different causes separate. Return candidates:[{check_id,title,hypothesis,execution_ids,existing_finding_id:null}]. "
+                            "Use only provided execution IDs. A candidate is a hypothesis, not a verified finding.",
+                            "response_schema": Clusters.model_json_schema(),
+                            "observations": tuple(o.model_dump() for o in batch),
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                Clusters,
+                model,
             )
             for batch in batches
         ]
