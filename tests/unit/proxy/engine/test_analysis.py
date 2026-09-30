@@ -1,3 +1,4 @@
+from types import MappingProxyType
 from typing import Final
 
 import pytest
@@ -181,3 +182,40 @@ async def test_invalid_model_output_has_only_one_repair_attempt() -> None:
     with pytest.raises(ValidationError):
         await structured_response(ModelRequest(purpose="extract", prompt="Extract observations"), Extraction, model)
     assert next(attempts, None) is None
+
+
+@pytest.mark.asyncio
+async def test_grouping_consolidates_prior_batches_and_reports_real_progress() -> None:
+    from litellm.proxy.engine.analysis import Clusters, Observation, cluster_batches
+    from litellm.proxy.engine.models import Coverage
+
+    candidate: Final = Candidate(
+        check_id="retries", title="Outage", hypothesis="Tool unavailable", execution_ids=("run1",)
+    )
+    observation: Final = Observation(check_id="retries", summary="Repeated timeout", evidence=())
+    stages: Final = iter((0, 1))
+    calls: Final = iter((False, True))
+
+    async def progress(stage: str, coverage: Coverage) -> None:
+        assert stage == "Grouping observations"
+        assert coverage.grouping_batches == 2
+        assert coverage.grouped_batches == next(stages)
+        assert coverage.screened == 2
+
+    async def model(request: ModelRequest) -> ModelResult:
+        if next(calls):
+            assert '"previous_candidates": [{"check_id": "retries", "title": "Outage"' in request.prompt
+            return ModelResult(
+                content=Clusters(
+                    candidates=(candidate.model_copy(update=MappingProxyType({"execution_ids": ("run1", "run2")})),)
+                ).model_dump_json(),
+                cost=0,
+            )
+        return ModelResult(content=Clusters(candidates=(candidate,)).model_dump_json(), cost=0)
+
+    result: Final = await cluster_batches(
+        ((observation,), (observation,)), model, progress, Coverage(screened=2, grouping_batches=2)
+    )
+    assert len(result.candidates) == 1
+    assert result.candidates[0].execution_ids == ("run1", "run2")
+    assert next(stages, None) is None

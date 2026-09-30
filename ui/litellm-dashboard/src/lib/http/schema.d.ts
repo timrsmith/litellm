@@ -29680,10 +29680,25 @@ export interface components {
         /** Coverage */
         Coverage: {
             /**
+             * Candidates
+             * @default 0
+             */
+            candidates: number;
+            /**
              * Eligible
              * @default 0
              */
             eligible: number;
+            /**
+             * Grouped Batches
+             * @default 0
+             */
+            grouped_batches: number;
+            /**
+             * Grouping Batches
+             * @default 0
+             */
+            grouping_batches: number;
             /**
              * Investigated
              * @default 0
@@ -32292,7 +32307,10 @@ export interface components {
             cost: number;
             /**
              * @default {
+             *       "candidates": 0,
              *       "eligible": 0,
+             *       "grouped_batches": 0,
+             *       "grouping_batches": 0,
              *       "investigated": 0,
              *       "partial": 0,
              *       "screened": 0,
@@ -39543,7 +39561,10 @@ export interface components {
         Progress: {
             /**
              * @default {
+             *       "candidates": 0,
              *       "eligible": 0,
+             *       "grouped_batches": 0,
+             *       "grouping_batches": 0,
              *       "investigated": 0,
              *       "partial": 0,
              *       "screened": 0,

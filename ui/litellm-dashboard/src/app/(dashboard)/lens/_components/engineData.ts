@@ -42,3 +42,62 @@ export function evidenceTarget(id: string): { source: string; team: string; id: 
     return null;
   }
 }
+
+export type Job = components["schemas"]["Job"];
+
+export function analysisProgress(job: Job) {
+  const {
+    screened = 0,
+    selected = 0,
+    grouped_batches = 0,
+    grouping_batches = 0,
+    investigated = 0,
+    candidates = 0,
+  } = job.coverage ?? {};
+  if (job.status === "queued") {
+    return {
+      step: -1,
+      title: "Waiting for a worker",
+      done: 0,
+      total: 0,
+      detail: "Analysis will start when a worker is available.",
+    };
+  }
+  if (job.stage === "Grouping observations") {
+    return {
+      step: 1,
+      title: "Finding patterns",
+      done: grouped_batches,
+      total: grouping_batches,
+      detail: grouping_batches
+        ? `${grouped_batches} of ${grouping_batches} observation batches compared`
+        : `Comparing observations across ${screened} reviewed runs`,
+    };
+  }
+  if (job.stage === "Checking original evidence") {
+    return {
+      step: 2,
+      title: "Checking evidence",
+      done: investigated,
+      total: candidates,
+      detail: candidates
+        ? `${investigated} of ${candidates} patterns checked against the original activity`
+        : `${investigated} patterns checked against the original activity`,
+    };
+  }
+  return {
+    step: 0,
+    title: "Reviewing activity",
+    done: screened,
+    total: selected,
+    detail: `${screened} of ${selected} selected runs reviewed`,
+  };
+}
+
+export function analysisElapsed(createdAt: string, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 1000));
+  if (!Number.isFinite(seconds)) return "0s";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}

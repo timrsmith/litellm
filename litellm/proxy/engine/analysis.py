@@ -35,8 +35,8 @@ class Extraction(Record):
 
 class Candidate(Record):
     check_id: str
-    title: str
-    hypothesis: str
+    title: str = Field(max_length=160)
+    hypothesis: str = Field(max_length=2000)
     execution_ids: tuple[str, ...] = Field(max_length=20)
     existing_finding_id: str | None = None
 
@@ -266,35 +266,57 @@ async def analyze_sample(
     if not observations:
         return Result(coverage=coverage)
     batches: Final = observation_batches(observations)
-    clusters: Final = tuple(
+    grouping: Final = coverage.model_copy(update=MappingProxyType({"grouping_batches": len(batches)}))
+    clusters: Final = await cluster_batches(batches, model, progress, grouping)
+    candidates: Final = clusters.candidates
+    investigating: Final = grouping.model_copy(
+        update=MappingProxyType({"grouped_batches": len(batches), "candidates": len(candidates)})
+    )
+    findings: Final = tuple(
         [
-            await structured_response(
-                ModelRequest(
-                    purpose="cluster",
-                    prompt=json.dumps(
-                        {  # mutable-ok: JSON encoder requires a dictionary
-                            "task": "Group observations into up to 5 distinct useful patterns for the supplied questions. "
-                            "Keep different causes separate. Return candidates:[{check_id,title,hypothesis,execution_ids,existing_finding_id:null}]. "
-                            "Use only provided execution IDs. A candidate is a hypothesis, not a verified finding.",
-                            "response_schema": Clusters.model_json_schema(),
-                            "observations": tuple(o.model_dump() for o in batch),
-                        },
-                        ensure_ascii=False,
-                    ),
-                ),
-                Clusters,
-                model,
-            )
-            for batch in batches
+            item
+            async for item in investigate_candidates(claim, candidates, examined, read, model, progress, investigating)
         ]
     )
-    candidates: Final = tuple(chain.from_iterable(group.candidates for group in clusters))[:10]
-    findings: Final = tuple(
-        [item async for item in investigate_candidates(claim, candidates, examined, read, model, progress, coverage)]
-    )
     return Result(
-        findings=findings, coverage=coverage.model_copy(update=MappingProxyType({"investigated": len(candidates)}))
+        findings=findings, coverage=investigating.model_copy(update=MappingProxyType({"investigated": len(candidates)}))
     )
+
+
+async def cluster_batches(
+    batches: tuple[tuple[Observation, ...], ...],
+    model: ModelCall,
+    progress: ReportProgress,
+    coverage: Coverage,
+    previous: tuple[Candidate, ...] = (),
+    index: int = 0,
+) -> Clusters:
+    if not batches:
+        return Clusters(candidates=previous)
+    await progress("Grouping observations", coverage.model_copy(update=MappingProxyType({"grouped_batches": index})))
+    grouped: Final = await structured_response(
+        ModelRequest(
+            purpose="cluster",
+            prompt=json.dumps(
+                {  # mutable-ok: JSON encoder requires a dictionary
+                    "task": "Update one consolidated set of up to 10 useful patterns from all observations so far. "
+                    "Merge observations about the same check and same cause into an existing candidate, including "
+                    "its supporting execution IDs. Retain distinct prior patterns when new observations do not "
+                    "contradict them. Keep different causes separate and distinguish recovered errors from blocked "
+                    "outcomes. Prioritize actionable failures over routine successful behavior. "
+                    "Return candidates:[{check_id,title,hypothesis,execution_ids,existing_finding_id:null}]. "
+                    "Use only provided execution IDs. A candidate is a hypothesis, not a verified finding.",
+                    "response_schema": Clusters.model_json_schema(),
+                    "previous_candidates": tuple(c.model_dump() for c in previous),
+                    "observations": tuple(o.model_dump() for o in batches[0]),
+                },
+                ensure_ascii=False,
+            ),
+        ),
+        Clusters,
+        model,
+    )
+    return await cluster_batches(batches[1:], model, progress, coverage, grouped.candidates, index + 1)
 
 
 async def investigate_candidate(

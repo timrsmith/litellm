@@ -77,6 +77,9 @@ class Coverage(Record):
     selected: int = 0
     screened: int = 0
     investigated: int = 0
+    grouping_batches: int = 0
+    grouped_batches: int = 0
+    candidates: int = 0
     partial: int = 0
     unassessable: int = 0
 

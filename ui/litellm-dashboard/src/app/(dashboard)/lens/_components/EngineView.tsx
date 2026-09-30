@@ -3,18 +3,7 @@
 import type { components } from "@/lib/http/schema";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  Aperture,
-  ArrowUpRight,
-  CheckCircle2,
-  Circle,
-  Layers3,
-  Pause,
-  Play,
-  Plus,
-  Settings2,
-} from "lucide-react";
+import { Aperture, ArrowUpRight, CheckCircle2, Circle, Layers3, Pause, Play, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -23,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/components/networking";
 import { TraceDrawer } from "@/components/view_logs/TraceView/TraceDrawer";
 import { EngineSetup } from "./EngineSetup";
+import { EngineProgress } from "./EngineProgress";
 import { WorkerSetup } from "./WorkerSetup";
 import { engineStatus, evidenceTarget, type Engine, type EngineList, type Finding, type Settings } from "./engineData";
 
@@ -261,17 +251,17 @@ export function EngineView({ accessToken, readOnly = false }: { accessToken: str
               </div>
             </div>
             {active && (
-              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3 text-sm">
-                <span className="flex items-center gap-2">
-                  <Activity className="size-4" />
-                  {active.stage}. You can leave this page.
-                </span>
-                {!readOnly && (
-                  <Button variant="ghost" size="sm" onClick={() => update(`/engine/${engine.id}/cancel`, {})}>
-                    Cancel analysis
-                  </Button>
-                )}
-              </div>
+              <EngineProgress
+                key={active.id}
+                job={active}
+                onCancel={
+                  readOnly
+                    ? undefined
+                    : () => {
+                        void update(`/engine/${engine.id}/cancel`, {});
+                      }
+                }
+              />
             )}
             {job?.error && (
               <p role="alert" className="text-sm text-destructive">
