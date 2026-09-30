@@ -2,7 +2,7 @@ from typing import Final
 
 import pytest
 
-from litellm.proxy.engine.analysis import Candidate, Examined, evidence_valid, investigate, partition_content
+from litellm.proxy.engine.analysis import Candidate, Examined, evidence_valid, extract, investigate, partition_content
 from litellm.proxy.engine.models import (
     Claim,
     Evidence,
@@ -62,3 +62,74 @@ async def test_investigator_rejects_a_fabricated_quote() -> None:
         model,
     )
     assert result.finding is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paginated", [False, True])
+@pytest.mark.parametrize("assessable", [False, True])
+async def test_assessable_content_is_not_overridden_by_unknown_chunks(paginated: bool, assessable: bool) -> None:
+    execution: Final = Execution(
+        id="run1", source="traces", trace_id="t", team_id="alpha", name="review", start_time="", span_count=4
+    )
+    unknown: Final = tuple(
+        TracePart(execution_id="run1", span_id=str(i), name="tool", kind="tool", content="x" * 8000) for i in range(3)
+    )
+    answer: Final = TracePart(
+        execution_id="run1",
+        span_id="3",
+        name="agent",
+        kind="agent",
+        content="verified result" if assessable else "outcome unavailable",
+    )
+
+    async def read(_execution_id: str, cursor: str, _offset: int) -> ExecutionContent:
+        if cursor:
+            return ExecutionContent(execution=execution, parts=(answer,))
+        return ExecutionContent(
+            execution=execution,
+            parts=unknown if paginated else (*unknown, answer),
+            next_cursor="2" if paginated else None,
+        )
+
+    async def model(request: ModelRequest) -> ModelResult:
+        unavailable: Final = "false" if "verified result" in request.prompt else "true"
+        return ModelResult(content='{"observations":[],"cannot_assess":' + unavailable + "}", cost=0)
+
+    claim: Final = Claim(engine_id="engine", job=queue_job(engine(), NOW, "job").jobs[0], findings=())
+    result: Final = await extract(claim, execution, read, model)
+    assert result.cannot_assess is not assessable
+
+
+@pytest.mark.asyncio
+async def test_investigator_keeps_final_outcome_ahead_of_repeated_model_history() -> None:
+    execution: Final = Execution(
+        id="run1", source="traces", trace_id="t", team_id="alpha", name="review", start_time="", span_count=6
+    )
+    history: Final = tuple(
+        TracePart(
+            execution_id="run1", span_id=str(i), name="chat", kind="llm", parent_span_id="span", content="x" * 8000
+        )
+        for i in range(5)
+    )
+    outcome: Final = TracePart(execution_id="run1", span_id="span", name="lead", kind="agent", content="timeout")
+    examined: Final = Examined(
+        execution=execution, observations=(), parts=(*history, outcome), partial=False, cannot_assess=False
+    )
+
+    async def model(request: ModelRequest) -> ModelResult:
+        if '"content": "timeout"' not in request.prompt:
+            return ModelResult(content='{"action":"inconclusive"}', cost=0)
+        return ModelResult(content='{"action":"submit","finding":' + finding("run1").model_dump_json() + "}", cost=0)
+
+    async def read(_execution_id: str, _cursor: str, _offset: int) -> ExecutionContent:
+        return ExecutionContent(execution=execution, parts=examined.parts)
+
+    claim: Final = Claim(engine_id="engine", job=queue_job(engine(), NOW, "job").jobs[0], findings=())
+    result: Final = await investigate(
+        claim,
+        Candidate(check_id="retries", title="Retries", hypothesis="Unrecovered", execution_ids=("run1",)),
+        (examined,),
+        read,
+        model,
+    )
+    assert result.finding == finding("run1")

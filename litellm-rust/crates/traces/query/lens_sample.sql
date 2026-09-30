@@ -29,7 +29,8 @@ SELECT *, count() OVER () AS eligible FROM (
       AND if(EngineReceivedMs>0,toInt64(EngineReceivedMs),toUnixTimestamp64Milli(end_time)) >= {start:UInt64}
       AND EngineReceivedMs < {end:UInt64}
       AND toUnixTimestamp64Milli(end_time) < {end:UInt64}
-      AND arrayAll((k,v) -> JSONExtractString(metadata,k)=v OR (k='tag' AND has(request_tags,v)),
+      AND arrayAll((k,v) -> JSONExtractString(metadata,k)=v
+          OR JSONExtractString(metadata,'requester_metadata',k)=v OR (k='tag' AND has(request_tags,v)),
           {filter_keys:Array(String)},{filter_values:Array(String)})
       AND ({service:String}='' OR model_group={service:String})
       AND NOT has(request_tags,'litellm-engine')

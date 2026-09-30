@@ -293,7 +293,7 @@ export function EngineSetup({
               <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
                 {initial
                   ? "Changes apply to future scans. You can recheck recent runs from the lens page."
-                  : "The first scan reviews the last 24 hours. You can leave this page while it runs."}{" "}
+                  : "The first scan reviews the last 24 hours. New activity becomes eligible after two minutes. You can leave this page while it runs."}{" "}
                 Larger workloads are sampled; coverage is shown with every scan.
               </div>
             </>

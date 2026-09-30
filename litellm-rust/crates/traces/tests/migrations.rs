@@ -41,7 +41,8 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
     let spend = serde_json::from_value(serde_json::json!({
         "request_id": "request-1", "response_id": "response-1", "team_id": "team-1", "api_key": "hash-1", "spend": 0.125,
         "start_time": timestamp / 1_000_000, "end_time": timestamp / 1_000_000 + 100,
-        "completion_start_time": null
+        "completion_start_time": null,
+        "metadata": serde_json::json!({"requester_metadata": {"swarm": "research"}}).to_string()
     }))?;
     insert_rows(
         &client,
@@ -149,7 +150,26 @@ async fn schema_supports_span_rollups_and_spend_joins() -> Result<(), Box<dyn st
     let sample: serde_json::Value = serde_json::from_str(&sample)?;
     assert_eq!(sample["data"].as_array().map(Vec::len), Some(1));
     assert_eq!(sample["data"][0]["trace_id"], "trace-1");
-    let read_params: BTreeMap<String, Parameter> = lens_params
+    let request_params: BTreeMap<String, Parameter> = lens_params
+        .into_iter()
+        .chain([
+            ("source".to_owned(), Parameter::Text("requests".to_owned())),
+            (
+                "filter_keys".to_owned(),
+                Parameter::Strings(vec!["swarm".to_owned()]),
+            ),
+            (
+                "filter_values".to_owned(),
+                Parameter::Strings(vec!["research".to_owned()]),
+            ),
+        ])
+        .collect();
+    let requests =
+        execute_named_read(&client, &connection, ReadQuery::LensSample, &request_params).await?;
+    let requests: serde_json::Value = serde_json::from_str(&requests)?;
+    assert_eq!(requests["data"].as_array().map(Vec::len), Some(1));
+    assert_eq!(requests["data"][0]["trace_id"], "request-1");
+    let read_params: BTreeMap<String, Parameter> = request_params
         .into_iter()
         .chain([
             ("source".to_owned(), Parameter::Text("traces".to_owned())),
