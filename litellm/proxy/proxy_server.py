@@ -471,6 +471,7 @@ from litellm.proxy.auth.master_key_boot_check import (
     master_key_boot_verdict,
     with_stored_secrets_counted,
 )
+from litellm.proxy.model_listing_cache import ModelListingCache, listing_cache_key, listing_cache_ttl
 from litellm.proxy.auth.model_checks import (
     GLOBAL_ALIASES_ONLY,
     OtherDeploymentsBill,
@@ -3178,6 +3179,15 @@ spend_counter_cache: Final = DualCache(default_in_memory_ttl=UserAPIKeyCacheTTLE
 spend_counter_store: Final = SpendCounterStore(connect(None).spend_counters())
 cli_sso_session_cache: Final = DualCache(default_in_memory_ttl=CLI_SSO_SESSION_TTL_SECONDS)
 saml_sso_cache: Final = DualCache(default_in_memory_ttl=SAML_AUTHN_REQUEST_TTL_SECONDS)
+model_info_listing_cache: Final = ModelListingCache[tuple[Mapping[str, object], ...]]()
+model_group_listing_cache: Final = ModelListingCache[dict[str, list[ModelGroupInfoProxy]]]()
+
+
+def invalidate_model_listings() -> None:
+    model_info_listing_cache.clear()
+    model_group_listing_cache.clear()
+
+
 model_max_budget_limiter: Final = PROXY_VirtualKeyModelMaxBudgetLimiter(dual_cache=spend_counter_cache)
 litellm.logging_callback_manager.add_litellm_callback(model_max_budget_limiter)
 redis_usage_cache: RedisCache | None = None  # redis cache used for tracking spend, tpm/rpm limits
@@ -7963,6 +7973,7 @@ class ProxyConfig:
         for model_id in router_model_ids:
             if model_id not in combined_id_list and model_id not in kept_config_ids:
                 llm_router.apply(ChangeSet(delete=[model_id]))
+        invalidate_model_listings()
         return frozenset(combined_id_list) | kept_config_ids
 
     def _resolve_db_litellm_param(self, key: str, value: object) -> object:
@@ -8022,6 +8033,7 @@ class ProxyConfig:
 
             if added is not None:
                 added_models += 1
+        invalidate_model_listings()
         return added_models
 
     def decrypt_model_list_from_db(self, new_models: list) -> list:
@@ -8127,6 +8139,7 @@ class ProxyConfig:
 
         if llm_router is not None:
             llm_model_list = llm_router.registry().deployments()
+        invalidate_model_listings()
 
         if config_data is not None:
             self._add_callbacks_from_db_config(config_data)
@@ -18645,6 +18658,16 @@ async def model_info_v1(
                 )
         return _model_info_json_response(single_model_list)
 
+    listing_ttl: Final = listing_cache_ttl(general_settings)
+    listing_key: Final = listing_cache_key(
+        "model_info_v1",
+        user_api_key_dict,
+        {"include_team_models": include_team_models, "teamId": teamId, "healthy_only": healthy_only},
+    )
+    cached_listing: Final = model_info_listing_cache.get(listing_key) if listing_ttl else None
+    if cached_listing is not None:
+        return _model_info_json_response(cached_listing)
+
     # Return router deployments (same source as /v2/model/info), not wildcard-
     # expanded model names from get_complete_model_list(). Team-scoped rows
     # use internal routing keys (model_name_{team_id}_{uuid}) and were omitted
@@ -18735,6 +18758,8 @@ async def model_info_v1(
     )
 
     verbose_proxy_logger.debug("all_models: %s", visible_models)
+    if listing_ttl:
+        model_info_listing_cache.put(listing_key, visible_models, listing_ttl)
     return _model_info_json_response(visible_models)
 
 
@@ -19011,6 +19036,12 @@ async def model_group_info(
     if llm_model_list is None or llm_router is None or not llm_model_list:
         return {"data": []}
 
+    listing_ttl: Final = listing_cache_ttl(general_settings)
+    listing_key: Final = listing_cache_key("model_group_info", user_api_key_dict, {"model_group": model_group})
+    cached_listing: Final = model_group_listing_cache.get(listing_key) if listing_ttl else None
+    if cached_listing is not None:
+        return cached_listing
+
     from litellm.proxy.utils import get_available_models_for_user
 
     # Get available models for the user
@@ -19073,13 +19104,16 @@ async def model_group_info(
         user_api_key_dict, tuple(dict.fromkeys(public_group_names))
     )
 
-    return {
+    listing: Final = {
         "data": [
             group
             for group, public_name in zip(model_groups, public_group_names, strict=True)
             if public_name not in callback_hidden_names
         ]
     }
+    if listing_ttl:
+        model_group_listing_cache.put(listing_key, listing, listing_ttl)
+    return listing
 
 
 @router.get(
